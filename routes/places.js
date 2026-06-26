@@ -4,10 +4,21 @@ import { requireAuth, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
-// ──────────────────────────────────────────────
-// GET /api/places
-// Parámetros opcionales: category (string), limit (number, máx 100)
-// ──────────────────────────────────────────────
+
+function dailyShuffle(arr, extraSeed = 0) {
+  const today = new Date().toISOString().slice(0, 10); // "2026-06-26"
+  let seed = today.split("-").reduce((acc, n) => acc + parseInt(n), 0) + extraSeed;
+
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    seed = (seed * 1664525 + 1013904223) & 0xffffffff;
+    const j = Math.abs(seed) % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+
 router.get("/", async (req, res) => {
   try {
     const { category, limit = 50 } = req.query;
@@ -18,7 +29,6 @@ router.get("/", async (req, res) => {
       .select(
         "id,name,category,description,address,photo_url_1,promotion,rating,opens_at,closes_at,open_days"
       )
-      .order("created_at", { ascending: false })
       .limit(safeLimit);
 
     if (category && category !== "all") {
@@ -36,16 +46,15 @@ router.get("/", async (req, res) => {
 
     const { data, error } = await query;
     if (error) throw error;
-    res.json(data ?? []);
+
+    // Orden aleatorio que cambia cada 24 horas
+    res.json(dailyShuffle(data ?? [], 0));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/places/featured
-// Últimos 8 lugares para el carousel
-// ──────────────────────────────────────────────
+
 router.get("/featured", async (_req, res) => {
   try {
     const { data, error } = await supabaseMainAdmin
@@ -53,20 +62,18 @@ router.get("/featured", async (_req, res) => {
       .select(
         "id,name,category,description,address,photo_url_1,promotion,rating,opens_at,closes_at,open_days"
       )
-      .order("created_at", { ascending: false })
       .limit(8);
 
     if (error) throw error;
-    res.json(data ?? []);
+
+    // Semilla +99 para que el carousel tenga orden diferente al listado principal
+    res.json(dailyShuffle(data ?? [], 99));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/places/:id
-// Detalle completo + lugares relacionados
-// ──────────────────────────────────────────────
+
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -91,7 +98,6 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "Lugar no encontrado" });
     }
 
-    // Lugares relacionados (misma categoría, sin este)
     const { data: related } = await supabaseMainAdmin
       .from("places")
       .select("id,name,category,description,photo_url_1,photo_url_2,photo_url_3,rating,address,promotion,opens_at,closes_at,open_days,opening_hours")
@@ -106,9 +112,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────
-// POST /api/places  (solo admin)
-// ──────────────────────────────────────────────
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const {
@@ -153,9 +156,6 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────
-// PUT /api/places/:id  (solo admin)
-// ──────────────────────────────────────────────
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -201,9 +201,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────────────
-// DELETE /api/places/:id  (solo admin)
-// ──────────────────────────────────────────────
+
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { error } = await supabaseMainAdmin
