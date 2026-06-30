@@ -41,4 +41,26 @@ USING ( bucket_id = 'places-images' );
 
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
+-- Roles por usuario usando la tabla profiles
+ALTER TABLE public.profiles
+ADD COLUMN IF NOT EXISTS role text DEFAULT 'user';
+
+UPDATE public.profiles
+SET role = COALESCE(NULLIF(btrim(role), ''), 'user')
+WHERE role IS NULL;
+
+-- Permisos para que el backend pueda leer las tablas con el service role
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.profiles TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.places TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.ads TO service_role;
+
+-- Opción rápida: asignar admin directo en los metadatos de Auth (la app lo lee ya)
+UPDATE auth.users
+SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+WHERE email = 'leandrope234@gmail.com';
+
+-- Si prefieres usar la tabla profiles, este también sirve una vez que quedan los permisos correctos
+-- UPDATE public.profiles SET role = 'admin' WHERE id = 'b2fb31cc-dfc0-490f-bccb-32ba0a78ea1a';
+
 

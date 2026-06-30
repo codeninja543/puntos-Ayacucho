@@ -4,21 +4,42 @@ import { requireAuth, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
+// ──────────────────────────────────────────────
+// Rotación diaria por turnos (round-robin)
+//
+// Cada 24 horas, un negocio distinto pasa a ser el primero de la lista.
+// No usa azar: es un desplazamiento (rotate) determinista basado en
+// cuántos días han pasado desde una fecha de referencia fija, así que
+// es reproducible y justo — con el tiempo todos los negocios tienen su
+// turno de aparecer primero.
+// ──────────────────────────────────────────────
+const ROTATION_EPOCH = new Date("2026-01-01T00:00:00Z").getTime();
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-function dailyShuffle(arr, extraSeed = 0) {
-  const today = new Date().toISOString().slice(0, 10); // "2026-06-26"
-  let seed = today.split("-").reduce((acc, n) => acc + parseInt(n), 0) + extraSeed;
-
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    seed = (seed * 1664525 + 1013904223) & 0xffffffff;
-    const j = Math.abs(seed) % (i + 1);
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+function getDailyRotationOffset(totalItems) {
+  if (!totalItems || totalItems <= 0) return 0;
+  const daysSinceEpoch = Math.floor((Date.now() - ROTATION_EPOCH) / ONE_DAY_MS);
+  return daysSinceEpoch % totalItems;
 }
 
+/** Rota el array de modo que el elemento en `offset` pase a ser el primero. */
+function applyDailyRotation(items) {
+  try {
+    const offset = getDailyRotationOffset(items.length);
+    if (offset === 0) return items;
+    return [...items.slice(offset), ...items.slice(0, offset)];
+  } catch (e) {
+    // Si algo falla en la rotación, nunca debe tumbar el endpoint:
+    // devolvemos el orden original sin rotar.
+    console.error("⚠️ Error en applyDailyRotation, usando orden sin rotar:", e);
+    return items;
+  }
+}
 
+// ──────────────────────────────────────────────
+// GET /api/places
+// Parámetros opcionales: category (string), limit (number, máx 100)
+// ──────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const { category, limit = 50 } = req.query;
@@ -29,11 +50,10 @@ router.get("/", async (req, res) => {
       .select(
         "id,name,category,description,address,photo_url_1,promotion,rating,opens_at,closes_at,open_days"
       )
-      .limit(safeLimit);
+      .order("created_at", { ascending: true });
 
     if (category && category !== "all") {
       if (category === "__otros__") {
-        // Categorías que no son las principales
         const main = [
           "pizzas", "cafe", "karaoke", "discotecas",
           "tabernas", "chifas", "pollerias", "bares",
@@ -45,16 +65,23 @@ router.get("/", async (req, res) => {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      console.error("❌ Error consultando places en GET /api/places:", error);
+      throw error;
+    }
 
-    // Orden aleatorio que cambia cada 24 horas
-    res.json(dailyShuffle(data ?? [], 0));
+    const rotated = applyDailyRotation(data ?? []);
+    res.json(rotated.slice(0, safeLimit));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ GET /api/places falló:", err);
+    res.status(500).json({ error: err.message || "Error interno del servidor" });
   }
 });
 
-
+// ──────────────────────────────────────────────
+// GET /api/places/featured
+// 8 lugares para el carousel, con la misma rotación diaria que el grid
+// ──────────────────────────────────────────────
 router.get("/featured", async (_req, res) => {
   try {
     const { data, error } = await supabaseMainAdmin
@@ -62,22 +89,28 @@ router.get("/featured", async (_req, res) => {
       .select(
         "id,name,category,description,address,photo_url_1,promotion,rating,opens_at,closes_at,open_days"
       )
-      .limit(8);
+      .order("created_at", { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error("❌ Error consultando places en GET /api/places/featured:", error);
+      throw error;
+    }
 
-    // Semilla +99 para que el carousel tenga orden diferente al listado principal
-    res.json(dailyShuffle(data ?? [], 99));
+    const rotated = applyDailyRotation(data ?? []);
+    res.json(rotated.slice(0, 8));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ GET /api/places/featured falló:", err);
+    res.status(500).json({ error: err.message || "Error interno del servidor" });
   }
 });
 
-
+// ──────────────────────────────────────────────
+// GET /api/places/:id
+// Detalle completo + lugares relacionados
+// ──────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    // Validate UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(id)) {
       return res.status(404).json({ error: "Lugar no encontrado" });
@@ -108,10 +141,14 @@ router.get("/:id", async (req, res) => {
 
     res.json({ place, related: related ?? [] });
   } catch (err) {
+    console.error("❌ GET /api/places/:id falló:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// ──────────────────────────────────────────────
+// POST /api/places  (solo admin)
+// ──────────────────────────────────────────────
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const {
@@ -152,10 +189,14 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     if (error) throw error;
     res.status(201).json(data);
   } catch (err) {
+    console.error("❌ POST /api/places falló:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// ──────────────────────────────────────────────
+// PUT /api/places/:id  (solo admin)
+// ──────────────────────────────────────────────
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -197,11 +238,14 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (err) {
+    console.error("❌ PUT /api/places/:id falló:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-
+// ──────────────────────────────────────────────
+// DELETE /api/places/:id  (solo admin)
+// ──────────────────────────────────────────────
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { error } = await supabaseMainAdmin
@@ -212,6 +256,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (error) throw error;
     res.json({ success: true });
   } catch (err) {
+    console.error("❌ DELETE /api/places/:id falló:", err);
     res.status(500).json({ error: err.message });
   }
 });

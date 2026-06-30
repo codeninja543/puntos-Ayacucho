@@ -1,194 +1,240 @@
+import "dotenv/config";
 import { Router } from "express";
-import { supabaseMain, supabaseMainAdmin, supabaseMainConfigured } from "../lib/supabase.js";
-
-/**
- * Rutas de autenticación.
- *
- * TODA la lógica de Supabase Auth vive aquí. El frontend NUNCA habla con
- * Supabase directamente — solo llama a estos endpoints y guarda el
- * access_token/refresh_token que le devolvemos (en localStorage, por ej).
- *
- * Esto evita exponer la URL/anon key de Supabase en el bundle del navegador.
- */
+import { supabaseMain, supabaseMainAdmin } from "../lib/supabase.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-function notConfigured(res) {
-  return res.status(503).json({ error: "Supabase no está configurado en el servidor." });
+function hasAdminRole(value) {
+  return typeof value === "string" && /admin/i.test(value);
 }
 
-// ──────────────────────────────────────────────
-// POST /api/auth/signup
-// Body: { email, password, full_name }
-// ──────────────────────────────────────────────
+async function getProfileRole(userId) {
+  try {
+    const client = supabaseMainAdmin || supabaseMain;
+    const { data, error } = await client
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("⚠️  getProfileRole error:", error.message);
+      return null;
+    }
+
+    if (data?.role) {
+      return data.role;
+    }
+
+    const { error: insertError } = await client.from("profiles").insert({ id: userId, role: "user" });
+    if (insertError && !/duplicate key|already exists|23505/i.test(insertError.message || "")) {
+      console.warn("⚠️  No se pudo crear el perfil del usuario:", insertError.message);
+    }
+
+    return null;
+  } catch (err) {
+    console.warn("⚠️  getProfileRole failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+async function checkIsAdmin(userId, user = null) {
+  try {
+    const profileRole = await getProfileRole(userId);
+    if (hasAdminRole(profileRole)) {
+      return true;
+    }
+
+    const client = supabaseMainAdmin || supabaseMain;
+    const byId = await client
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .ilike("role", "%admin%")
+      .maybeSingle();
+
+    if (byId.error) {
+      console.warn("⚠️  checkIsAdmin error by user_id:", byId.error.message);
+    }
+    if (byId.data) return true;
+
+    if (user?.email) {
+      const byEmail = await client
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.email)
+        .ilike("role", "%admin%")
+        .maybeSingle();
+
+      if (byEmail.error) {
+        console.warn("⚠️  checkIsAdmin error by email fallback:", byEmail.error.message);
+      }
+      if (byEmail.data) return true;
+    }
+
+    const roleMetadata = user?.user_metadata?.role ?? user?.app_metadata?.role;
+    if (hasAdminRole(roleMetadata)) {
+      return true;
+    }
+
+    const rolesArray = user?.user_metadata?.roles ?? user?.app_metadata?.roles;
+    if (Array.isArray(rolesArray) && rolesArray.some((role) => hasAdminRole(role))) {
+      return true;
+    }
+
+    const adminEmails = (process.env.ADMIN_EMAILS || "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (user?.email && adminEmails.includes(user.email.toLowerCase())) {
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.warn("⚠️  checkIsAdmin failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 router.post("/signup", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
   try {
     const { email, password, full_name } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "email y password son obligatorios" });
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+    const { data, error } = await supabaseMain.auth.signUp({ email, password, options: { data: { full_name } } });
+    if (error) throw error;
+
+    if (data.user?.id) {
+      const client = supabaseMainAdmin || supabaseMain;
+      try {
+        await client.from("profiles").upsert({ id: data.user.id, role: "user" }, { onConflict: "id" });
+      } catch (upsertErr) {
+        console.warn("⚠️  No se pudo inicializar el perfil del usuario:", upsertErr);
+      }
     }
 
-    const { data, error } = await supabaseMain.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: full_name || null } },
-    });
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    res.status(201).json({
-      user: data.user,
-      session: data.session, // null si requiere confirmación de email
-    });
+    res.status(201).json({ user: data.user, session: data.session });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// POST /api/auth/signin
-// Body: { email, password }
-// ──────────────────────────────────────────────
 router.post("/signin", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "email y password son obligatorios" });
-    }
-
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
     const { data, error } = await supabaseMain.auth.signInWithPassword({ email, password });
-    if (error) return res.status(401).json({ error: error.message });
-
-    const isAdmin = await checkIsAdmin(data.user.id);
-    res.json({ user: data.user, session: data.session, isAdmin });
+    if (error) throw error;
+    const profileRole = data.user ? await getProfileRole(data.user.id) : null;
+    const isAdmin = data.user ? await checkIsAdmin(data.user.id, data.user) : false;
+    res.json({ user: data.user, session: data.session, isAdmin, role: profileRole });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// POST /api/auth/signout
-// Header: Authorization: Bearer <access_token>
-// ──────────────────────────────────────────────
 router.post("/signout", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
-  try {
-    const token = (req.headers.authorization ?? "").replace("Bearer ", "");
-    if (token) {
-      // signOut con el token del usuario invalida esa sesión en Supabase
-      await supabaseMain.auth.admin?.signOut?.(token).catch(() => {});
-    }
-    res.json({ success: true });
-  } catch {
-    // El cierre de sesión en el cliente (borrar localStorage) es lo
-    // importante; no fallamos la petición si Supabase no responde.
-    res.json({ success: true });
-  }
+  res.json({ success: true });
 });
 
-// ──────────────────────────────────────────────
-// POST /api/auth/refresh
-// Body: { refresh_token }
-// Renueva la sesión cuando el access_token expira.
-// ──────────────────────────────────────────────
 router.post("/refresh", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
   try {
     const { refresh_token } = req.body;
-    if (!refresh_token) {
-      return res.status(400).json({ error: "refresh_token es obligatorio" });
-    }
-
+    if (!refresh_token) return res.status(400).json({ error: "Refresh token required" });
     const { data, error } = await supabaseMain.auth.refreshSession({ refresh_token });
-    if (error) return res.status(401).json({ error: error.message });
-
+    if (error) throw error;
     res.json({ user: data.user, session: data.session });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/auth/me
-// Header: Authorization: Bearer <access_token>
-// Devuelve el usuario actual + si es admin, a partir del token.
-// El frontend llama esto al cargar la app para restaurar la sesión.
-// ──────────────────────────────────────────────
 router.get("/me", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
   try {
-    const token = (req.headers.authorization ?? "").replace("Bearer ", "");
-    if (!token) return res.status(401).json({ error: "No autenticado" });
-
+    const token = (req.headers.authorization || "").replace("Bearer ", "");
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
     const { data, error } = await supabaseMain.auth.getUser(token);
-    if (error || !data?.user) return res.status(401).json({ error: "Token inválido o expirado" });
-
-    const isAdmin = await checkIsAdmin(data.user.id);
-    res.json({ user: data.user, isAdmin });
+    if (error || !data?.user) return res.status(401).json({ error: "Invalid token" });
+    const profileRole = await getProfileRole(data.user.id);
+    const isAdmin = await checkIsAdmin(data.user.id, data.user);
+    res.json({ user: data.user, isAdmin, role: profileRole });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// POST /api/auth/forgot-password
-// Body: { email }
-// ──────────────────────────────────────────────
+router.get("/debug", requireAuth, async (req, res) => {
+  try {
+    const client = supabaseMainAdmin || supabaseMain;
+    const [byId, byEmail] = await Promise.all([
+      client
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", req.user.id)
+        .ilike("role", "%admin%")
+        .maybeSingle(),
+      req.user.email
+        ? client
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", req.user.email)
+            .ilike("role", "%admin%")
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+
+    const isAdmin = await checkIsAdmin(req.user.id, req.user);
+    res.json({
+      user: req.user,
+      isAdmin,
+      user_roles_by_id: byId.data,
+      user_roles_by_email: byEmail.data,
+      env: {
+        SUPABASE_URL_MAIN: Boolean(process.env.SUPABASE_URL_MAIN),
+        SUPABASE_ANON_KEY_MAIN: Boolean(process.env.SUPABASE_ANON_KEY_MAIN),
+        SUPABASE_SERVICE_ROLE_KEY_MAIN: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY_MAIN),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 router.post("/forgot-password", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
   try {
     const { email } = req.body;
-    if (!email) return res.status(400).json({ error: "email es obligatorio" });
-
-    const { error } = await supabaseMain.auth.resetPasswordForEmail(email, {
-      redirectTo: process.env.FRONTEND_URL || undefined,
-    });
-    if (error) return res.status(400).json({ error: error.message });
-
+    if (!email) return res.status(400).json({ error: "Email required" });
+    await supabaseMain.auth.resetPasswordForEmail(email);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/auth/google
-// Devuelve la URL de OAuth de Google para que el navegador redirija.
-// El frontend hace: window.location.href = url
-// ──────────────────────────────────────────────
-router.get("/google", async (req, res) => {
-  if (!supabaseMainConfigured) return notConfigured(res);
+router.get("/google", async (_req, res) => {
   try {
+    const redirectTo = process.env.GOOGLE_CALLBACK_URL || process.env.FRONTEND_URL || "http://localhost:5173/";
     const { data, error } = await supabaseMain.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: process.env.FRONTEND_URL || undefined,
-        skipBrowserRedirect: true, // queremos la URL, no que el server redirija
+        redirectTo,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
+        scopes: ["email", "profile"],
       },
     });
-    if (error) return res.status(400).json({ error: error.message });
 
-    res.json({ url: data.url });
+    if (error) throw error;
+
+    res.json({ url: data?.url ?? null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Error iniciando OAuth con Google:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "No se pudo iniciar con Google" });
   }
 });
-
-// ── Helper interno ──────────────────────────────────────────────────────
-async function checkIsAdmin(userId) {
-  try {
-    const { data } = await supabaseMainAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .eq("role", "admin")
-      .maybeSingle();
-    return !!data;
-  } catch {
-    return false;
-  }
-}
 
 export default router;
