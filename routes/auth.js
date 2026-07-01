@@ -9,6 +9,15 @@ function hasAdminRole(value) {
   return typeof value === "string" && /admin/i.test(value);
 }
 
+function isMissingTableError(error) {
+  const msg = error?.message?.toString?.().toLowerCase?.() ?? "";
+  return msg.includes("relation \"user_roles\" does not exist")
+    || msg.includes("relation \"profiles\" does not exist")
+    || msg.includes("table \"user_roles\" does not exist")
+    || msg.includes("table \"profiles\" does not exist")
+    || msg.includes("could not find the table");
+}
+
 async function getProfileRole(userId) {
   try {
     const client = supabaseMainAdmin || supabaseMain;
@@ -19,6 +28,10 @@ async function getProfileRole(userId) {
       .maybeSingle();
 
     if (error) {
+      if (isMissingTableError(error)) {
+        console.warn("⚠️  getProfileRole: tabla profiles no existe, usando fallback");
+        return null;
+      }
       console.warn("⚠️  getProfileRole error:", error.message);
       return null;
     }

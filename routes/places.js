@@ -162,6 +162,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "Campos obligatorios: name, category, description, address, photo_url_1" });
     }
 
+    const isUuid = (value) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
     const payload = {
       name, category, description, address,
       website: website || null,
@@ -175,9 +176,9 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       opening_hours: opening_hours || null,
       opens_at: opens_at || null,
       closes_at: closes_at || null,
-      open_days: open_days ?? [0, 1, 2, 3, 4, 5, 6],
+      open_days: Array.isArray(open_days) ? open_days : [0, 1, 2, 3, 4, 5, 6],
       rating: Math.max(0, Math.min(5, parseFloat(rating) || 0)),
-      created_by: req.user.id,
+      created_by: isUuid(req.user?.id) ? req.user.id : null,
     };
 
     const { data, error } = await supabaseMainAdmin
