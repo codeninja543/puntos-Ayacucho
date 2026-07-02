@@ -10,7 +10,6 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 import placesRouter from "./routes/places.js";
-import uploadRouter from "./routes/upload.js";
 import authRouter from "./routes/auth.js";
 
 const app = express();
@@ -25,7 +24,6 @@ app.use(express.json());
 
 // ── API ────────────────────────────────────────
 app.use("/api/places", placesRouter);
-app.use("/api/upload", uploadRouter);
 app.use("/api/auth", authRouter);
 
 // Health check
@@ -44,9 +42,6 @@ app.get("/api/diagnostico", (_req, res) => {
     SUPABASE_URL_MAIN: process.env.SUPABASE_URL_MAIN ? "✅ definida" : "❌ FALTA",
     SUPABASE_ANON_KEY_MAIN: process.env.SUPABASE_ANON_KEY_MAIN ? "✅ definida" : "❌ FALTA",
     SUPABASE_SERVICE_ROLE_KEY_MAIN: process.env.SUPABASE_SERVICE_ROLE_KEY_MAIN ? "✅ definida" : "❌ FALTA",
-    SUPABASE_URL_STORAGE: process.env.SUPABASE_URL_STORAGE ? "✅ definida" : "❌ FALTA",
-    SUPABASE_ANON_KEY_STORAGE: process.env.SUPABASE_ANON_KEY_STORAGE ? "✅ definida" : "❌ FALTA",
-    SUPABASE_SERVICE_ROLE_KEY_STORAGE: process.env.SUPABASE_SERVICE_ROLE_KEY_STORAGE ? "✅ definida" : "❌ FALTA",
   });
 });
 

@@ -4,6 +4,50 @@ import { requireAuth, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
+function normalizePlaceMetrics(place) {
+  if (!place) return place;
+  return {
+    ...place,
+    views: Number(place.views ?? 0) || 0,
+    reservations: Number(place.reservation_count ?? place.reservations ?? place.bookings ?? 0) || 0,
+  };
+}
+
+async function incrementPlaceCounter(placeId, candidateColumns) {
+  for (const column of candidateColumns) {
+    try {
+      const { data, error: selectError } = await supabaseMainAdmin
+        .from("places")
+        .select(column)
+        .eq("id", placeId)
+        .maybeSingle();
+
+      if (selectError) {
+        const message = String(selectError?.message || "");
+        if (message.includes("does not exist") || message.includes("Could not find")) continue;
+        console.warn(`⚠️ No se pudo leer ${column} para el lugar ${placeId}:`, selectError.message);
+        continue;
+      }
+
+      const currentValue = Number(data?.[column] ?? 0) || 0;
+      const { error: updateError } = await supabaseMainAdmin
+        .from("places")
+        .update({ [column]: currentValue + 1 })
+        .eq("id", placeId);
+
+      if (!updateError) return column;
+
+      const updateMessage = String(updateError?.message || "");
+      if (updateMessage.includes("does not exist") || updateMessage.includes("Could not find")) continue;
+      console.warn(`⚠️ No se pudo actualizar ${column} para el lugar ${placeId}:`, updateError.message);
+    } catch (err) {
+      console.warn(`⚠️ Error al incrementar ${column} en el lugar ${placeId}:`, err);
+    }
+  }
+
+  return null;
+}
+
 // ──────────────────────────────────────────────
 // Rotación diaria por turnos (round-robin)
 //
@@ -47,9 +91,7 @@ router.get("/", async (req, res) => {
 
     let query = supabaseMainAdmin
       .from("places")
-      .select(
-        "id,name,category,description,address,photo_url_1,promotion,rating,opens_at,closes_at,open_days"
-      )
+      .select("*")
       .order("created_at", { ascending: true });
 
     if (category && category !== "all") {
@@ -70,7 +112,7 @@ router.get("/", async (req, res) => {
       throw error;
     }
 
-    const rotated = applyDailyRotation(data ?? []);
+    const rotated = applyDailyRotation((data ?? []).map(normalizePlaceMetrics));
     res.json(rotated.slice(0, safeLimit));
   } catch (err) {
     console.error("❌ GET /api/places falló:", err);
@@ -86,9 +128,7 @@ router.get("/featured", async (_req, res) => {
   try {
     const { data, error } = await supabaseMainAdmin
       .from("places")
-      .select(
-        "id,name,category,description,address,photo_url_1,promotion,rating,opens_at,closes_at,open_days"
-      )
+      .select("*")
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -96,10 +136,97 @@ router.get("/featured", async (_req, res) => {
       throw error;
     }
 
-    const rotated = applyDailyRotation(data ?? []);
+    const rotated = applyDailyRotation((data ?? []).map(normalizePlaceMetrics));
     res.json(rotated.slice(0, 8));
   } catch (err) {
     console.error("❌ GET /api/places/featured falló:", err);
+    res.status(500).json({ error: err.message || "Error interno del servidor" });
+  }
+});
+
+// ──────────────────────────────────────────────
+// POST /api/places/:id/reserve
+// Incrementa el contador de reservas del negocio
+// ──────────────────────────────────────────────
+router.post("/:id/reserve", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return res.status(404).json({ error: "Lugar no encontrado" });
+    }
+
+    await incrementPlaceCounter(id, ["reservation_count", "reservations", "bookings"]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ POST /api/places/:id/reserve falló:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────
+// POST /api/places/:id/rate
+// Guarda una calificación de 1 a 5 y actualiza el promedio
+// ──────────────────────────────────────────────
+router.post("/:id/rate", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rating } = req.body ?? {};
+    const numericRating = Number(rating);
+    const safeRating = Math.max(1, Math.min(5, Math.round(numericRating || 0)));
+
+    if (!Number.isFinite(numericRating) || numericRating < 1 || numericRating > 5) {
+      return res.status(400).json({ error: "La calificación debe estar entre 1 y 5" });
+    }
+
+    const { error: insertError } = await supabaseMainAdmin
+      .from("place_ratings")
+      .insert({ place_id: id, rating: safeRating });
+
+    if (insertError) {
+      const message = String(insertError?.message || "");
+      if (!message.includes("does not exist") && !message.includes("Could not find") && !message.includes("relation") && !message.includes("table")) {
+        console.warn("⚠️ No se pudo guardar la calificación en place_ratings:", insertError.message);
+      }
+
+      const { data: placeData, error: placeError } = await supabaseMainAdmin
+        .from("places")
+        .select("rating")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (placeError) throw placeError;
+
+      const { error: updateError } = await supabaseMainAdmin
+        .from("places")
+        .update({ rating: safeRating })
+        .eq("id", id);
+
+      if (updateError) throw updateError;
+
+      return res.json({ rating: safeRating, rating_count: 1 });
+    }
+
+    const { data: rows, error: rowsError } = await supabaseMainAdmin
+      .from("place_ratings")
+      .select("rating")
+      .eq("place_id", id);
+
+    if (rowsError) throw rowsError;
+
+    const values = (rows ?? []).map(item => Number(item.rating) || 0).filter(Boolean);
+    const average = values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1)) : safeRating;
+
+    const { error: updateError } = await supabaseMainAdmin
+      .from("places")
+      .update({ rating: average })
+      .eq("id", id);
+
+    if (updateError) throw updateError;
+
+    res.json({ rating: average, rating_count: values.length });
+  } catch (err) {
+    console.error("❌ POST /api/places/:id/rate falló:", err);
     res.status(500).json({ error: err.message || "Error interno del servidor" });
   }
 });
@@ -131,15 +258,21 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "Lugar no encontrado" });
     }
 
+    const nextViews = (Number(place.views ?? 0) || 0) + 1;
+    await incrementPlaceCounter(id, ["views"]);
+
     const { data: related } = await supabaseMainAdmin
       .from("places")
-      .select("id,name,category,description,photo_url_1,photo_url_2,photo_url_3,rating,address,promotion,opens_at,closes_at,open_days,opening_hours")
+      .select("*")
       .eq("category", place.category)
       .neq("id", id)
       .order("rating", { ascending: false })
       .limit(6);
 
-    res.json({ place, related: related ?? [] });
+    res.json({
+      place: normalizePlaceMetrics({ ...place, views: nextViews }),
+      related: (related ?? []).map(normalizePlaceMetrics),
+    });
   } catch (err) {
     console.error("❌ GET /api/places/:id falló:", err);
     res.status(500).json({ error: err.message });
