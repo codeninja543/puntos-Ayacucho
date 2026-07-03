@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
 
+    <!-- ── Preconnect & Preload critical resources ── -->
+    <link rel="preconnect" href="https://i.postimg.cc" crossorigin />
+    <link rel="preload" as="image" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
+
     <!-- ── Favicon ── -->
     <link rel="icon" type="image/png" sizes="32x32" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
     <link rel="apple-touch-icon" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
@@ -40,8 +44,48 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Puntos Ayacucho" />
-    <script type="module" crossorigin src="/assets/index-B7e2V0oI.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CwsW2rdn.css">
+
+    <!-- ── JSON-LD Schema: Organization (helps Google display logo in search) ── -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Puntos Ayacucho",
+      "url": "https://puntosayacucho.com",
+      "logo": "https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png",
+      "description": "Guía local de los mejores lugares de Huamanga, Ayacucho: restaurantes, cafés, discotecas, karaokes y más.",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Huamanga",
+        "addressRegion": "Ayacucho",
+        "addressCountry": "PE"
+      },
+      "sameAs": [
+        "https://www.facebook.com/puntosayacucho",
+        "https://www.instagram.com/puntosayacucho"
+      ]
+    }
+    </script>
+
+    <!-- ── JSON-LD Schema: WebSite (for search box support) ── -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "url": "https://puntosayacucho.com",
+      "name": "Puntos Ayacucho",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://puntosayacucho.com?search={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+    <script type="module" crossorigin src="/assets/index-vnllxR12.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BekVSdMm.css">
   </head>
   <body>
     <div id="root"></div>
