@@ -10,6 +10,7 @@ function normalizePlaceMetrics(place) {
     ...place,
     views: Number(place.views ?? 0) || 0,
     reservations: Number(place.reservation_count ?? place.reservations ?? place.bookings ?? 0) || 0,
+    direction_clicks: Number(place.direction_clicks ?? place.directions_clicks ?? 0) || 0,
   };
 }
 
@@ -165,6 +166,26 @@ router.post("/:id/reserve", async (req, res) => {
 });
 
 // ──────────────────────────────────────────────
+// POST /api/places/:id/directions
+// Incrementa el contador de clics en "Cómo llegar"
+// ──────────────────────────────────────────────
+router.post("/:id/directions", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      return res.status(404).json({ error: "Lugar no encontrado" });
+    }
+
+    await incrementPlaceCounter(id, ["direction_clicks", "directions_clicks"]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ POST /api/places/:id/directions falló:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────
 // POST /api/places/:id/rate
 // Guarda una calificación de 1 a 5 y actualiza el promedio
 // ──────────────────────────────────────────────
@@ -219,7 +240,7 @@ router.post("/:id/rate", async (req, res) => {
 
     const { error: updateError } = await supabaseMainAdmin
       .from("places")
-      .update({ rating: average })
+      .update({ rating: average, rating_count: values.length })
       .eq("id", id);
 
     if (updateError) throw updateError;
