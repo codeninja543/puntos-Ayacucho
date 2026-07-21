@@ -11,6 +11,9 @@ function normalizePlaceMetrics(place) {
     views: Number(place.views ?? 0) || 0,
     reservations: Number(place.reservation_count ?? place.reservations ?? place.bookings ?? 0) || 0,
     direction_clicks: Number(place.direction_clicks ?? place.directions_clicks ?? 0) || 0,
+    // Si el lugar no tiene días configurados (null/undefined), asumimos que
+    // atiende todos los días en vez de mostrarlo como "cerrado" siempre.
+    open_days: Array.isArray(place.open_days) ? place.open_days : [0, 1, 2, 3, 4, 5, 6],
   };
 }
 
