@@ -1,93 +1,34 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-
-    <!-- ── Preconnect & Preload critical resources ── -->
-    <link rel="preconnect" href="https://i.postimg.cc" crossorigin />
-    <link rel="preload" as="image" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
-
-    <!-- ── Favicon ── -->
-    <link rel="icon" type="image/png" sizes="32x32" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
-    <link rel="apple-touch-icon" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
-
-    <!-- ── Viewport ── -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#8b3a1a" />
-
-    <!-- ── SEO básico ── -->
-    <title>Puntos Ayacucho — Lugares, Karaokes, cafés y más en Huamanga</title>
+    <link rel="icon" type="image/png" href="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Puntos Ayacucho</title>
     <meta name="description" content="Descubre los mejores lugares de Ayacucho: pizzerías, cafés, discotecas, karaokes, cevicherías, bares y más. Con fotos, promociones y cómo llegar." />
-    <meta name="keywords" content="lugares ayacucho, restaurantes huamanga, cafés ayacucho, discotecas ayacucho, karaoke ayacucho, puntosayacucho" />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://puntosayacucho.com" />
-
-    <!-- ── Open Graph (Facebook, WhatsApp, Google) ── -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://puntosayacucho.com" />
-    <meta property="og:title" content="Puntos Ayacucho — Los mejores lugares de Huamanga" />
-    <meta property="og:description" content="Descubre pizzerías, cafés, discotecas, karaokes, cevicherías y más en Ayacucho. Con fotos, promociones y cómo llegar." />
-    <meta property="og:image" content="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
-    <meta property="og:image:width" content="512" />
-    <meta property="og:image:height" content="512" />
-    <meta property="og:locale" content="es_PE" />
-    <meta property="og:site_name" content="Puntos Ayacucho" />
-
-    <!-- ── Twitter / X ── -->
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Puntos Ayacucho — Los mejores lugares de Huamanga" />
-    <meta name="twitter:description" content="Descubre los mejores lugares de Ayacucho con fotos, promociones y cómo llegar." />
-    <meta name="twitter:image" content="https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png" />
-
-    <!-- ── PWA / Mobile ── -->
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Puntos Ayacucho" />
-
-    <!-- ── JSON-LD Schema: Organization (helps Google display logo in search) ── -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "name": "Puntos Ayacucho",
-      "url": "https://puntosayacucho.com",
-      "logo": "https://i.postimg.cc/v8NJ5vGj/puntos-ayacucho.png",
-      "description": "Guía local de los mejores lugares de Huamanga, Ayacucho: restaurantes, cafés, discotecas, karaokes y más.",
-      "address": {
-        "@type": "PostalAddress",
-        "addressLocality": "Huamanga",
-        "addressRegion": "Ayacucho",
-        "addressCountry": "PE"
-      },
-      "sameAs": [
-        "https://www.facebook.com/puntosayacucho",
-        "https://www.instagram.com/puntosayacucho"
-      ]
-    }
-    </script>
-
-    <!-- ── JSON-LD Schema: WebSite (for search box support) ── -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "url": "https://puntosayacucho.com",
-      "name": "Puntos Ayacucho",
-      "potentialAction": {
-        "@type": "SearchAction",
-        "target": {
-          "@type": "EntryPoint",
-          "urlTemplate": "https://puntosayacucho.com?search={search_term_string}"
-        },
-        "query-input": "required name=search_term_string"
-      }
-    }
-    </script>
-    <script type="module" crossorigin src="/assets/index-DleRAAVC.js"></script>
+    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+    <script type="module" crossorigin src="/assets/index-D3EpdRX3.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DfO41sIi.css">
   </head>
   <body>
     <div id="root"></div>
+
+    <script>
+      (function(){
+        try {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', '/app-config.json', false);
+          xhr.send(null);
+          if (xhr.status === 200) {
+            window.__APP_CONFIG = JSON.parse(xhr.responseText);
+          } else {
+            window.__APP_CONFIG = window.__APP_CONFIG || {};
+          }
+        } catch (e) {
+          window.__APP_CONFIG = window.__APP_CONFIG || {};
+        }
+      })();
+    </script>
   </body>
 </html>

@@ -9,7 +9,7 @@ function normalizePlaceMetrics(place) {
   return {
     ...place,
     views: Number(place.views ?? 0) || 0,
-    reservations: Number(place.reservation_count ?? place.reservations ?? place.bookings ?? 0) || 0,
+    reservations: Number(place.reservations ?? place.reservation_count ?? place.bookings ?? 0) || 0,
     direction_clicks: Number(place.direction_clicks ?? place.directions_clicks ?? 0) || 0,
     // Si el lugar no tiene días configurados (null/undefined), asumimos que
     // atiende todos los días en vez de mostrarlo como "cerrado" siempre.
@@ -17,39 +17,62 @@ function normalizePlaceMetrics(place) {
   };
 }
 
-async function incrementPlaceCounter(placeId, candidateColumns) {
-  for (const column of candidateColumns) {
-    try {
-      const { data, error: selectError } = await supabaseMainAdmin
-        .from("places")
-        .select(column)
-        .eq("id", placeId)
-        .maybeSingle();
+// ──────────────────────────────────────────────
+// Incrementa un contador (views / reservations / direction_clicks)
+// de forma atómica usando la función SQL increment_place_counter
+// (ver migración en backend/sql/counters.sql). Si la función RPC no
+// existe todavía en la base de datos, hace fallback a leer+escribir
+// directamente sobre la columna, y deja bien claro en los logs cuál
+// es el problema real en vez de fallar en silencio.
+// ──────────────────────────────────────────────
+async function incrementPlaceCounter(placeId, column) {
+  // 1) Intento atómico vía RPC (evita condiciones de carrera)
+  const { error: rpcError } = await supabaseMainAdmin.rpc("increment_place_counter", {
+    p_place_id: placeId,
+    p_column: column,
+  });
 
-      if (selectError) {
-        const message = String(selectError?.message || "");
-        if (message.includes("does not exist") || message.includes("Could not find")) continue;
-        console.warn(`⚠️ No se pudo leer ${column} para el lugar ${placeId}:`, selectError.message);
-        continue;
-      }
+  if (!rpcError) return true;
 
-      const currentValue = Number(data?.[column] ?? 0) || 0;
-      const { error: updateError } = await supabaseMainAdmin
-        .from("places")
-        .update({ [column]: currentValue + 1 })
-        .eq("id", placeId);
-
-      if (!updateError) return column;
-
-      const updateMessage = String(updateError?.message || "");
-      if (updateMessage.includes("does not exist") || updateMessage.includes("Could not find")) continue;
-      console.warn(`⚠️ No se pudo actualizar ${column} para el lugar ${placeId}:`, updateError.message);
-    } catch (err) {
-      console.warn(`⚠️ Error al incrementar ${column} en el lugar ${placeId}:`, err);
-    }
+  const rpcMessage = String(rpcError?.message || "");
+  const rpcMissing = rpcMessage.includes("does not exist") || rpcMessage.includes("Could not find");
+  if (!rpcMissing) {
+    console.warn(`⚠️ RPC increment_place_counter falló para ${column} en ${placeId}:`, rpcError.message);
   }
 
-  return null;
+  // 2) Fallback: leer valor actual y escribir +1
+  try {
+    const { data, error: selectError } = await supabaseMainAdmin
+      .from("places")
+      .select(column)
+      .eq("id", placeId)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error(`❌ La columna "${column}" no existe o no se pudo leer en "places":`, selectError.message);
+      return false;
+    }
+    if (!data) {
+      console.warn(`⚠️ No se encontró el lugar ${placeId} al incrementar ${column}`);
+      return false;
+    }
+
+    const currentValue = Number(data[column] ?? 0) || 0;
+    const { error: updateError } = await supabaseMainAdmin
+      .from("places")
+      .update({ [column]: currentValue + 1 })
+      .eq("id", placeId);
+
+    if (updateError) {
+      console.error(`❌ No se pudo actualizar "${column}" para el lugar ${placeId}:`, updateError.message);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error(`❌ Error inesperado al incrementar "${column}" en el lugar ${placeId}:`, err);
+    return false;
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -101,8 +124,9 @@ router.get("/", async (req, res) => {
     if (category && category !== "all") {
       if (category === "__otros__") {
         const main = [
-          "pizzas", "cafe", "karaoke", "discotecas",
-          "tabernas", "chifas", "pollerias", "bares",
+          "pizzas_karaoke", "pizzas", "karaoke", "cafe", "discotecas",
+          "tabernas", "cevicherias", "bares", "heladerias",
+          "recreo", "emprendimientos", "pasteleria", "hamburguesas", "antojitos",
         ];
         query = query.not("category", "in", `(${main.join(",")})`);
       } else {
@@ -160,7 +184,13 @@ router.post("/:id/reserve", async (req, res) => {
       return res.status(404).json({ error: "Lugar no encontrado" });
     }
 
-    await incrementPlaceCounter(id, ["reservation_count", "reservations", "bookings"]);
+    const ok = await incrementPlaceCounter(id, "reservations");
+    if (!ok) {
+      return res.status(500).json({
+        success: false,
+        error: "No se pudo registrar la reserva. Verifica que la tabla 'places' tenga la columna 'reservations' (ver backend/sql/counters.sql).",
+      });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error("❌ POST /api/places/:id/reserve falló:", err);
@@ -180,7 +210,13 @@ router.post("/:id/directions", async (req, res) => {
       return res.status(404).json({ error: "Lugar no encontrado" });
     }
 
-    await incrementPlaceCounter(id, ["direction_clicks", "directions_clicks"]);
+    const ok = await incrementPlaceCounter(id, "direction_clicks");
+    if (!ok) {
+      return res.status(500).json({
+        success: false,
+        error: "No se pudo registrar el clic en 'Cómo llegar'. Verifica que la tabla 'places' tenga la columna 'direction_clicks' (ver backend/sql/counters.sql).",
+      });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error("❌ POST /api/places/:id/directions falló:", err);
@@ -283,7 +319,10 @@ router.get("/:id", async (req, res) => {
     }
 
     const nextViews = (Number(place.views ?? 0) || 0) + 1;
-    await incrementPlaceCounter(id, ["views"]);
+    const viewsOk = await incrementPlaceCounter(id, "views");
+    if (!viewsOk) {
+      console.error(`❌ No se pudo incrementar "views" para el lugar ${id}. Verifica que la columna exista (ver backend/sql/counters.sql).`);
+    }
 
     const { data: related } = await supabaseMainAdmin
       .from("places")
