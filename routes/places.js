@@ -348,7 +348,7 @@ router.get("/:id", async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const {
-      name, category, description, address, website, phone,
+      name, category, description, address, website, phone, delivery_phone,
       photo_url_1, photo_url_2, photo_url_3,
       promotion, how_to_get_there, map_url,
       opening_hours, opens_at, closes_at, open_days, rating,
@@ -363,6 +363,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       name, category, description, address,
       website: website || null,
       phone: phone || null,
+      delivery_phone: delivery_phone || null,
       photo_url_1,
       photo_url_2: photo_url_2 || null,
       photo_url_3: photo_url_3 || null,
@@ -398,7 +399,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const {
-      name, category, description, address, website, phone,
+      name, category, description, address, website, phone, delivery_phone,
       photo_url_1, photo_url_2, photo_url_3,
       promotion, how_to_get_there, map_url,
       opening_hours, opens_at, closes_at, open_days, rating,
@@ -412,6 +413,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       name, category, description, address,
       website: website || null,
       phone: phone || null,
+      delivery_phone: delivery_phone || null,
       photo_url_1,
       photo_url_2: photo_url_2 || null,
       photo_url_3: photo_url_3 || null,
