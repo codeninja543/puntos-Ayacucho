@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { Router } from "express";
 import { supabaseMain, supabaseMainAdmin } from "../lib/supabase.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -247,6 +247,62 @@ router.get("/google", async (_req, res) => {
   } catch (err) {
     console.error("❌ Error iniciando OAuth con Google:", err);
     res.status(500).json({ error: err instanceof Error ? err.message : "No se pudo iniciar con Google" });
+  }
+});
+
+// ──────────────────────────────────────────────
+// GET /api/auth/users  (solo admin)
+// Lista todos los usuarios registrados: email, si entraron con Google
+// o con contraseña, fecha de registro y último acceso.
+// ──────────────────────────────────────────────
+router.get("/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!supabaseMainAdmin) {
+      return res.status(500).json({ error: "Falta configurar SUPABASE_SERVICE_ROLE_KEY_MAIN en el backend" });
+    }
+
+    const perPage = 1000;
+    let page = 1;
+    let allUsers = [];
+
+    // Supabase pagina de a máximo ~1000 usuarios por llamada; recorremos
+    // todas las páginas por si hay más de 1000 registrados.
+    while (true) {
+      const { data, error } = await supabaseMainAdmin.auth.admin.listUsers({ page, perPage });
+      if (error) throw error;
+
+      const pageUsers = data?.users ?? [];
+      allUsers = allUsers.concat(pageUsers);
+
+      if (pageUsers.length < perPage) break;
+      page += 1;
+      if (page > 20) break; // límite de seguridad (20,000 usuarios)
+    }
+
+    const users = allUsers
+      .map((u) => {
+        const identities = Array.isArray(u.identities) ? u.identities : [];
+        const providers = identities.length
+          ? identities.map((i) => i.provider)
+          : [u.app_metadata?.provider].filter(Boolean);
+
+        return {
+          id: u.id,
+          email: u.email ?? null,
+          full_name: u.user_metadata?.full_name || u.user_metadata?.name || null,
+          avatar_url: u.user_metadata?.avatar_url || u.user_metadata?.picture || null,
+          providers: providers.length ? providers : ["email"],
+          created_at: u.created_at ?? null,
+          last_sign_in_at: u.last_sign_in_at ?? null,
+          email_confirmed_at: u.email_confirmed_at ?? null,
+        };
+      })
+      .sort((a, b) => new Date(b.created_at ?? 0) - new Date(a.created_at ?? 0));
+
+    res.json({ users, total: users.length });
+  } catch (err) {
+    console.error("❌ GET /api/auth/users falló:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "No se pudo obtener la lista de usuarios" });
   }
 });
 
