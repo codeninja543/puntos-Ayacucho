@@ -17,14 +17,6 @@ function normalizePlaceMetrics(place) {
   };
 }
 
-// ──────────────────────────────────────────────
-// Incrementa un contador (views / reservations / direction_clicks)
-// de forma atómica usando la función SQL increment_place_counter
-// (ver migración en backend/sql/counters.sql). Si la función RPC no
-// existe todavía en la base de datos, hace fallback a leer+escribir
-// directamente sobre la columna, y deja bien claro en los logs cuál
-// es el problema real en vez de fallar en silencio.
-// ──────────────────────────────────────────────
 async function incrementPlaceCounter(placeId, column) {
   // 1) Intento atómico vía RPC (evita condiciones de carrera)
   const { error: rpcError } = await supabaseMainAdmin.rpc("increment_place_counter", {
@@ -123,10 +115,11 @@ router.get("/", async (req, res) => {
 
     if (category && category !== "all") {
       if (category === "__otros__") {
-        const main = [
+               const main = [
           "pizzas_karaoke", "pizzas", "karaoke", "cafe", "discotecas",
           "tabernas", "cevicherias", "bares", "heladerias",
-          "recreo", "emprendimientos", "pasteleria", "hamburguesas", "antojitos",
+          "recreo", "pasteleria", "hamburguesas", "antojitos",
+          "jugueteria", "flores",
         ];
         query = query.not("category", "in", `(${main.join(",")})`);
       } else {
@@ -230,41 +223,30 @@ router.post("/:id/directions", async (req, res) => {
 // ──────────────────────────────────────────────
 router.post("/:id/rate", async (req, res) => {
   try {
+    if (!supabaseMainAdmin) {
+      console.error("❌ POST /:id/rate: supabaseMainAdmin es null — falta SUPABASE_SERVICE_ROLE_KEY_MAIN en las variables de entorno del backend.");
+      return res.status(500).json({ error: "El servidor no está configurado correctamente para guardar calificaciones. Falta SUPABASE_SERVICE_ROLE_KEY_MAIN." });
+    }
+
     const { id } = req.params;
     const { rating } = req.body ?? {};
     const numericRating = Number(rating);
-    const safeRating = Math.max(1, Math.min(5, Math.round(numericRating || 0)));
 
     if (!Number.isFinite(numericRating) || numericRating < 1 || numericRating > 5) {
       return res.status(400).json({ error: "La calificación debe estar entre 1 y 5" });
     }
+
+    const safeRating = Math.max(1, Math.min(5, Math.round(numericRating)));
 
     const { error: insertError } = await supabaseMainAdmin
       .from("place_ratings")
       .insert({ place_id: id, rating: safeRating });
 
     if (insertError) {
-      const message = String(insertError?.message || "");
-      if (!message.includes("does not exist") && !message.includes("Could not find") && !message.includes("relation") && !message.includes("table")) {
-        console.warn("⚠️ No se pudo guardar la calificación en place_ratings:", insertError.message);
-      }
-
-      const { data: placeData, error: placeError } = await supabaseMainAdmin
-        .from("places")
-        .select("rating")
-        .eq("id", id)
-        .maybeSingle();
-
-      if (placeError) throw placeError;
-
-      const { error: updateError } = await supabaseMainAdmin
-        .from("places")
-        .update({ rating: safeRating })
-        .eq("id", id);
-
-      if (updateError) throw updateError;
-
-      return res.json({ rating: safeRating, rating_count: 1 });
+      console.error("❌ No se pudo guardar en place_ratings (¿falta crear la tabla en Supabase?):", insertError.message);
+      return res.status(500).json({
+        error: "No se pudo guardar tu calificación. Falta configurar la tabla 'place_ratings' en la base de datos.",
+      });
     }
 
     const { data: rows, error: rowsError } = await supabaseMainAdmin
